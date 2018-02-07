@@ -784,7 +784,7 @@ function! neomake#GetMaker(name_or_maker, ...) abort
             \ 'exe': maker.name,
             \ 'args': [],
             \ })
-        if !has_key(maker, 'process_output')
+        if !has_key(maker, 'process_output') && !has_key(maker, 'process_json')
             call extend(defaults, {
                 \ 'errorformat': &errorformat,
                 \ })
@@ -1768,7 +1768,7 @@ function! s:ProcessEntries(jobinfo, entries, ...) abort
         let prev_list = a:1
         let new_list = file_mode ? getloclist(0) : getqflist()
     else
-        " Fix entries with get_list_entries/process_output.
+        " Fix entries with get_list_entries/process_output/process_json.
         let maker_name = a:jobinfo.maker.name
         call map(a:entries, 'extend(v:val, {'
                     \ . "'bufnr': str2nr(get(v:val, 'bufnr', 0)),"
@@ -1948,11 +1948,25 @@ function! s:ProcessJobOutput(jobinfo, lines, source, ...) abort
                 \ '%s: processing %d lines of output.',
                 \ maker.name, len(a:lines)), a:jobinfo)
     try
-        if has_key(maker, 'process_output')
-            let entries = call(maker.process_output, [{
-                        \ 'output': a:lines,
-                        \ 'source': a:source,
-                        \ 'jobinfo': a:jobinfo}], maker)
+        if has_key(maker, 'process_json') || has_key(maker, 'process_output')
+            if has_key(maker, 'process_json')
+                let output = join(a:lines, "\n")
+                try
+                    let json = neomake#compat#json_decode(output)
+                catch
+                    call neomake#utils#ErrorMessage(printf(
+                                \ 'Failed to decode JSON: %s (output: %s).', v:exception, string(output)))
+                endtry
+                let entries = call(maker.process_json, [{
+                            \ 'json': json,
+                            \ 'source': a:source,
+                            \ 'jobinfo': a:jobinfo}], maker)
+            else
+                let entries = call(maker.process_output, [{
+                            \ 'output': a:lines,
+                            \ 'source': a:source,
+                            \ 'jobinfo': a:jobinfo}], maker)
+            endif
             if type(entries) != type([])
                 call neomake#utils#ErrorMessage(printf('The process_output method for maker %s did not return a list, but: %s.', maker.name, string(entries)[:100]), a:jobinfo)
                 return 0
